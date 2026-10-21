@@ -1,22 +1,29 @@
 'use strict';
 // Only encrypted responses are persisted. No password, key, or plaintext is stored.
-const DATA_CACHE='ielts-data-v5', MEDIA_CACHE='ielts-media-v2', pendingAssets=new Map();
+const DATA_CACHE='ielts-data-v6', MEDIA_CACHE='ielts-media-v2', pendingAssets=new Map();
 let warmConfig=null, warmCatalog=null, dictionaryTask=null, pronunciationTask=null, openingChapter=0;
 async function cachedAsset(path,options={}){
   const url=new URL(path,location.href).href;
-  let cache;try{cache=await caches.open(path.includes('media/')||path.includes('pronunciation/')?MEDIA_CACHE:DATA_CACHE);const hit=await cache.match(url);if(hit){const headers=new Headers(hit.headers);headers.set('X-IELTS-Cached','1');return new Response(hit.body,{status:200,headers})}}catch{}
+  let cache;try{cache=await caches.open(path.includes('media/')||path.includes('media-lite/')||path.includes('pronunciation/')?MEDIA_CACHE:DATA_CACHE);const hit=await cache.match(url);if(hit){const headers=new Headers(hit.headers);headers.set('X-IELTS-Cached','1');return new Response(hit.body,{status:200,headers})}}catch{}
   if(pendingAssets.has(url)){try{return(await pendingAssets.get(url)).clone()}catch(e){if(e.name==='AbortError'&&!options.signal?.aborted)return cachedAsset(path,options);throw e}}
   const task=(async()=>{
-    const response=await fetch(url,{signal:options.signal});if(!response.ok)throw Error('HTTP '+response.status);
-    let result=response;
-    if(options.progress&&response.body){
-      const reader=response.body.getReader(),chunks=[];let size=0;
-      for(;;){const {done,value}=await reader.read();if(done)break;chunks.push(value);size+=value.length;options.progress(size)}
-      result=new Response(new Blob(chunks),{status:200,headers:response.headers});
+    let result;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const response=await fetch(url,{signal:options.signal});if(!response.ok)throw Error('HTTP '+response.status);
+        result=response;
+        if(options.progress&&response.body){
+          const reader=response.body.getReader(),chunks=[];let size=0;
+          for(;;){const {done,value}=await reader.read();if(done)break;chunks.push(value);size+=value.length;options.progress(size)}
+          result=new Response(new Blob(chunks),{status:200,headers:response.headers});
+        }
+        break;
+      }
+      catch(error){if(options.signal?.aborted)throw error;if(attempt)throw error;await new Promise(resolve=>setTimeout(resolve,600))}
     }
     const headers=new Headers(result.headers);headers.set('X-IELTS-Cached','0');
     result=new Response(result.body,{status:200,headers});
-    if(cache)try{headers.set('X-IELTS-Cached','1');const stored=new Response(result.clone().body,{status:200,headers});await cache.put(url,stored);result=new Response(result.body,{status:200,headers})}catch{}
+    if(cache)try{headers.set('X-IELTS-Cached','1');const stored=new Response(result.clone().body,{status:200,headers});cache.put(url,stored).catch(()=>{})}catch{}
     return result;
   })();pendingAssets.set(url,task);
   try{return(await task).clone()}finally{pendingAssets.delete(url)}

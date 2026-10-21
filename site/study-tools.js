@@ -12,13 +12,13 @@ function annotateBlock(node,scope,source,anchor){
   if(!node||node.dataset.annotated)return;
   node.dataset.annotated='1';node.dataset.annotationKey=annotationKey(scope,source,anchor);
   const actions=document.createElement('span');actions.className='annotation-actions';
-  const button=document.createElement('button');button.type='button';button.className='annotation-button';button.textContent='✦ 标记 / 笔记';
-  button.onclick=e=>{e.stopPropagation();const sentence=scope==='chapter'?sentences[Number(anchor)]?.text:null;openAnnotation({scope,source,anchor,quote:(sentence||node.innerText||'').trim().slice(0,240)})};
+  const button=document.createElement('button');button.type='button';button.className='annotation-button';button.textContent=scope==='chapter'?'✦':'✦ 标记 / 笔记';button.setAttribute('aria-label',scope==='chapter'?'标记整句并记笔记':'标记并记笔记');
+  button.onclick=e=>{e.stopPropagation();const sentence=scope==='chapter'?sentences[Number(anchor)]?.text:null;openAnnotation({scope,source,anchor,quote:(sentence||node.innerText||'').trim().slice(0,240),whole:true})};
   actions.append(button);node.append(actions);paintAnnotations(node);
 }
 function paintAnnotations(node){
   const rows=annotationRows().filter(row=>row.key===node.dataset.annotationKey);
-  node.classList.toggle('has-annotation',rows.length>0);
+  node.classList.toggle('has-annotation',rows.some(row=>row.whole));
   node.style.setProperty('--annotation-color',rows.length?`var(--mark-${rows[rows.length-1].color||'yellow'})`:'transparent');
   node.querySelectorAll(':scope > .annotation-chip').forEach(x=>x.remove());
   for(const row of rows){
@@ -26,21 +26,79 @@ function paintAnnotations(node){
     chip.textContent=`✦ ${row.quote?.slice(0,28)||'笔记'}${row.note?' · '+row.note.slice(0,18):''}`;
     chip.onclick=e=>{e.stopPropagation();openAnnotation(row)};node.append(chip);
   }
-  if(node.matches('#text .sentence')){
-    node.querySelectorAll('.word').forEach(word=>word.classList.remove('marked-word'));
-    for(const row of rows){
-      const phrase=(row.quote||'').toLowerCase();
-      for(const word of node.querySelectorAll('.word')){
-        const char=Number(word.dataset.char),exact=Number.isFinite(row.start)&&Number.isFinite(row.end)?char>=row.start&&char<row.end:phrase.includes(word.textContent.toLowerCase());
-        if(exact){
-          word.classList.add('marked-word');word.style.setProperty('--word-mark',`var(--mark-${row.color||'yellow'})`);
-        }
-      }
+  if(node.matches('#text .sentence'))paintSentenceSelection(node,rows);
+  else paintBlockSelection(node,rows);
+}
+function blockTextNodes(node){
+  const out=[],walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+  while(walker.nextNode()){
+    const text=walker.currentNode;
+    if(text.parentElement.closest('button,.annotation-actions,.annotation-chip'))continue;
+    out.push(text);
+  }
+  return out;
+}
+function paintBlockSelection(node,rows){
+  for(const mark of [...node.querySelectorAll('mark.study-highlight')])mark.replaceWith(document.createTextNode(mark.textContent));
+  node.normalize();
+  const nodes=blockTextNodes(node),all=nodes.map(text=>text.textContent).join('');
+  const intervals=rows.map(row=>{
+    if(row.whole)return null;
+    if(Number.isFinite(row.start)&&Number.isFinite(row.end))return{start:row.start,end:row.end,color:row.color};
+    const at=all.indexOf(row.quote||'');return at>=0&&row.quote?{start:at,end:at+row.quote.length,color:row.color}:null;
+  }).filter(Boolean);
+  let at=0;
+  for(const textNode of nodes){
+    const value=textNode.textContent,start=at;at+=value.length;
+    const points=[0,value.length];
+    for(const mark of intervals)if(mark.start<at&&mark.end>start)points.push(Math.max(0,mark.start-start),Math.min(value.length,mark.end-start));
+    points.sort((a,b)=>a-b);
+    if(points.length<=2)continue;
+    const fragment=document.createDocumentFragment();
+    for(let i=0;i<points.length-1;i++){
+      const a=points[i],b=points[i+1];if(a===b)continue;
+      const active=[...intervals].reverse().find(mark=>mark.start<start+b&&mark.end>start+a);
+      if(active){const mark=document.createElement('mark');mark.className='study-highlight';mark.style.background=`var(--mark-${active.color||'yellow'})`;mark.textContent=value.slice(a,b);fragment.append(mark)}
+      else fragment.append(document.createTextNode(value.slice(a,b)));
     }
+    textNode.replaceWith(fragment);
+  }
+}
+function paintSentenceSelection(node,rows){
+  for(const mark of [...node.querySelectorAll('mark.study-highlight')])mark.replaceWith(document.createTextNode(mark.textContent));
+  node.normalize();
+  const sentence=sentences[Number(node.dataset.sentence)];if(!sentence)return;
+  const intervals=rows.map(row=>{
+    if(row.whole)return{start:sentence.charStart,end:sentence.charEnd,color:row.color};
+    if(Number.isFinite(row.start)&&Number.isFinite(row.end))return{start:row.start,end:row.end,color:row.color};
+    const at=sentence.text.indexOf(row.quote||'');
+    return at>=0&&row.quote?{start:sentence.charStart+at,end:sentence.charStart+at+row.quote.length,color:row.color}:null;
+  }).filter(Boolean);
+  let position=sentence.charStart;
+  for(const child of [...node.childNodes]){
+    if(child.nodeType===1&&child.matches('.annotation-actions,.annotation-chip,.speak-sentence'))continue;
+    if(child.nodeType===1&&child.tagName==='BR'){position++;continue}
+    const textNode=child.nodeType===3?child:child.nodeType===1&&child.matches('.word')?child.firstChild:null;
+    if(!textNode||textNode.nodeType!==3)continue;
+    const value=textNode.textContent,start=child.nodeType===1&&child.matches('.word')?Number(child.dataset.char):position;
+    const points=[0,value.length];
+    for(const mark of intervals){if(mark.start<start+value.length&&mark.end>start){points.push(Math.max(0,mark.start-start),Math.min(value.length,mark.end-start))}}
+    points.sort((a,b)=>a-b);
+    if(points.length>2){
+      const fragment=document.createDocumentFragment();
+      for(let j=0;j<points.length-1;j++){
+        const a=points[j],b=points[j+1];if(a===b)continue;
+        const segment=value.slice(a,b),mark=[...intervals].reverse().find(row=>row.start<start+b&&row.end>start+a);
+        if(mark){const span=document.createElement('mark');span.className='study-highlight';span.style.background=`var(--mark-${mark.color||'yellow'})`;span.textContent=segment;fragment.append(span)}
+        else fragment.append(document.createTextNode(segment));
+      }
+      textNode.replaceWith(fragment);
+    }
+    position=start+value.length;
   }
 }
 function openAnnotation(target){
-  annotationTarget={scope:target.scope,source:target.source,anchor:target.anchor,key:annotationKey(target.scope,target.source,target.anchor),quote:target.quote||''};
+  annotationTarget={scope:target.scope,source:target.source,anchor:target.anchor,key:annotationKey(target.scope,target.source,target.anchor),quote:target.quote||'',start:target.start,end:target.end,whole:!!target.whole};
   const match=annotationRows().find(row=>row.id===target.id);
   $('#annotationQuote').textContent=annotationTarget.quote;
   $('#annotationNote').value=match?.note||'';$('#annotationColor').value=match?.color||'yellow';
@@ -74,19 +132,63 @@ function decorateReading(){
       const content=document.createElement('div');content.className='gloss-content';
       while(gloss.firstChild)content.append(gloss.firstChild);
       content.hidden=true;
-      const toggle=document.createElement('button');toggle.type='button';toggle.className='gloss-toggle';toggle.textContent='查看本句含义与分析 ▾';
-      toggle.onclick=()=>{content.hidden=!content.hidden;toggle.textContent=content.hidden?'查看本句含义与分析 ▾':'收起本句含义与分析 ▴'};
+      const toggle=document.createElement('button');toggle.type='button';toggle.className='gloss-toggle';toggle.textContent='译 ▾';toggle.setAttribute('aria-label','查看本句含义与分析');
+      toggle.onclick=()=>{content.hidden=!content.hidden;toggle.textContent=content.hidden?'译 ▾':'收起译文 ▴'};
       gloss.append(toggle,content);
     }
   }
+  if(current.type==='reading')decorateParagraphs(article);
+}
+function decorateParagraphs(article){
+  const paragraphs=current.paragraphs||[];
+  paragraphs.forEach((paragraph,index)=>{
+    const sentenceIndex=sentences.findIndex(s=>s.charEnd>paragraph.charStart);
+    const first=article.querySelector(`.sentence[data-sentence="${sentenceIndex}"]`);if(!first)return;
+    const heading=document.createElement('div');heading.className='paragraph-heading';
+    heading.innerHTML=`<strong>第 ${index+1} 段</strong><span>${esc(paragraph.summary||'')}</span>`;
+    first.before(heading);
+  });
+  if(current.paragraphsReconstructed){const note=document.createElement('p');note.className='paragraph-recovery-note';note.textContent='此篇扫描原文没有保留可靠空行，段落按句群重建；内容顺序与原文一致。';article.prepend(note)}
 }
 renderText=function(){studyText();if(current)decorateReading()};
 renderReader=function(id){
   selectionPill.hidden=true;selectionSnapshot=null;
-  const match=items.find(x=>x.id===id);if(match)openedChapter[match.type]=id;
+  $('#articleSummary')?.remove();
+  const match=items.find(x=>x.id===id);
+  if(match){
+    openedChapter[match.type]=id;
+    if(match.type==='listening'){
+      match.audioOriginal||=match.audio;
+      match.audio=notes.audioQuality==='original'?match.audioOriginal:(match.audioFast||match.audioOriginal);
+    }
+  }
   const outcome=studyReader(id);
   if(match?.type==='reading')renderSummary(match);
+  if(match?.type==='listening')renderAudioQuality(match);
   return outcome;
+};
+function renderAudioQuality(chapter){
+  let label=$('#audioQualityLabel');
+  if(!label){
+    label=document.createElement('label');label.id='audioQualityLabel';
+    label.innerHTML='音频版本 <select id="audioQuality"><option value="fast">省流量 · 先播放</option><option value="original">原音质</option></select>';
+    $('#listeningTools .modebar').append(label);
+  }
+  $('#audioQuality').value=notes.audioQuality==='original'?'original':'fast';
+  $('#audioQuality').onchange=()=>{
+    notes.audioQuality=$('#audioQuality').value;saveProgress();scheduleSave();renderReader(chapter.id);
+  };
+}
+$('#downloadAudio').onclick=async()=>{
+  if(!current?.audio)return;
+  const chapter=current,button=$('#downloadAudio');button.disabled=true;button.textContent='正在缓存…';
+  try{
+    const response=await cachedAsset(chapter.audio.url);
+    if(response.headers.get('X-IELTS-Cached')!=='1')await(await caches.open(MEDIA_CACHE)).put(new URL(chapter.audio.url,location.href),response.clone());
+    if(current?.id===chapter.id)button.textContent='已缓存 ✓';
+    toast('本节音频已保存到当前浏览器');
+  }catch{toast('缓存未完成，请检查网络或可用存储空间')}
+  finally{button.disabled=false}
 };
 function renderSummary(chapter){
   $('#articleSummary')?.remove();
@@ -147,14 +249,23 @@ function captureSelection(){
   if(!node)return null;
   if(node.closest('#text')){
     const index=Number(node.dataset.sentence),sentence=sentences[index];
-    const anchorWord=origin?.closest?.('.word'),focusWord=focus?.closest?.('.word');
+    const range=selectedRange.getRangeAt(0),startElement=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement;
+    const endElement=range.endContainer.nodeType===1?range.endContainer:range.endContainer.parentElement;
+    const startWord=startElement?.closest?.('.word'),endWord=endElement?.closest?.('.word');
     const direct=sentence?.text.indexOf(quote)??-1;
-    const start=direct>=0?sentence.charStart+direct:Math.min(Number(anchorWord?.dataset.char),Number(focusWord?.dataset.char));
-    const end=direct>=0?start+quote.length:Math.max(Number(anchorWord?.dataset.char)+anchorWord?.textContent.length,Number(focusWord?.dataset.char)+focusWord?.textContent.length);
+    const start=startWord&&range.startContainer.nodeType===3?Number(startWord.dataset.char)+range.startOffset:direct>=0?sentence.charStart+direct:undefined;
+    const end=endWord&&range.endContainer.nodeType===3?Number(endWord.dataset.char)+range.endOffset:direct>=0?sentence.charStart+direct+quote.length:undefined;
     return{scope:'chapter',source:current.id,anchor:node.dataset.sentence,quote,index,start:Number.isFinite(start)?start:undefined,end:Number.isFinite(end)?end:undefined};
   }
   const key=node.dataset.annotationKey?.split('|');
-  return key?{scope:key[0],source:key[1],anchor:key.slice(2).join('|'),quote}:null;
+  if(!key)return null;
+  const range=selectedRange.getRangeAt(0),nodes=blockTextNodes(node);
+  const boundary=(container,offset)=>{
+    if(container.nodeType!==3)return undefined;
+    const i=nodes.indexOf(container);if(i<0)return undefined;
+    return nodes.slice(0,i).reduce((sum,text)=>sum+text.textContent.length,0)+offset;
+  };
+  return{scope:key[0],source:key[1],anchor:key.slice(2).join('|'),quote,start:boundary(range.startContainer,range.startOffset),end:boundary(range.endContainer,range.endOffset)};
 }
 function selectedTranslation(snapshot){
   if(!snapshot||snapshot.scope!=='chapter'||current?.type!=='reading')return;
