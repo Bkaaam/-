@@ -1,4 +1,9 @@
-const SHELL='ielts-shell-v2',MEDIA='ielts-media-v2';
-self.addEventListener('install',e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(['./','./index.html','./app.js','./style.css','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'])));self.skipWaiting()});
-self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim())});
-self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.origin!==self.location.origin||e.request.method!=='GET')return;if(u.pathname.includes('/media/')){e.respondWith(caches.open(MEDIA).then(async c=>(await c.match(e.request))||fetch(e.request)));return}if(u.pathname.endsWith('/config.json')||u.pathname.endsWith('/library.bin')){e.respondWith(caches.open(SHELL).then(async c=>{try{const r=await fetch(e.request,{cache:'no-cache'});if(r.ok)await c.put(e.request,r.clone());return r}catch(err){const r=await c.match(e.request);if(r)return r;throw err}}));return}if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).catch(()=>caches.match('./index.html')));return}e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});
+const SHELL='ielts-shell-v3.1';
+const FILES=['./','./index.html','./fast.js?v=3.1','./app.js?v=3.1','./topics.js?v=3.1','./style.css?v=3.1','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});
+self.addEventListener('activate',e=>{e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('ielts-shell-')&&k!==SHELL).map(k=>caches.delete(k))))]))});
+self.addEventListener('fetch',e=>{
+ const u=new URL(e.request.url);if(u.origin!==location.origin||e.request.method!=='GET')return;
+ if(u.pathname.endsWith('.bin')||u.pathname.endsWith('config.json'))return;
+ e.respondWith(fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(SHELL).then(c=>c.put(e.request,copy)).catch(()=>{})}return r}).catch(async()=>await caches.match(e.request)||(e.request.mode==='navigate'?await caches.match('./index.html'):Response.error())));
+});

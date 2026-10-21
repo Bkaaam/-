@@ -1,1 +1,1 @@
-{"version":2,"salt":"oUmSINoY69QJw+3iLQ82GVYMpiNrpPHR","iterations":310000,"library":"library.bin","compression":"gzip"}
+{"version":3,"salt":"oUmSINoY69QJw+3iLQ82GVYMpiNrpPHR","iterations":310000,"library":"library.bin","compression":"gzip","bootstrap":"data/catalog-d313c33bbac1.bin"}
