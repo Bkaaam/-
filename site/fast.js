@@ -1,6 +1,6 @@
 'use strict';
 // Only encrypted responses are persisted. No password, key, or plaintext is stored.
-const DATA_CACHE='ielts-data-v4', MEDIA_CACHE='ielts-media-v2', pendingAssets=new Map();
+const DATA_CACHE='ielts-data-v5', MEDIA_CACHE='ielts-media-v2', pendingAssets=new Map();
 let warmConfig=null, warmCatalog=null, dictionaryTask=null, pronunciationTask=null, openingChapter=0;
 async function cachedAsset(path,options={}){
   const url=new URL(path,location.href).href;

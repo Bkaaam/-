@@ -69,8 +69,6 @@ function showSelectionMeaning(){
 $('#text').addEventListener('click',event=>{
   if(current?.type==='reading'&&window.getSelection()?.toString().trim())event.stopImmediatePropagation();
 },true);
-$('#text').addEventListener('mouseup',()=>{clearTimeout(selectionTimer);selectionTimer=setTimeout(showSelectionMeaning,300)});
-$('#text').addEventListener('touchend',()=>{clearTimeout(selectionTimer);selectionTimer=setTimeout(showSelectionMeaning,420)},{passive:true});
 $('#selectionMode').onclick=()=>{selectionEnabled=!selectionEnabled;$('#selectionMode').textContent=selectionEnabled?'长按划选词句 · 翻译开启':'长按划选词句 · 翻译关闭'};
 $('#selectionDialog [data-close]').onclick=()=>$('#selectionDialog').close();
 
@@ -98,11 +96,11 @@ function renderNounPanel(){
 }
 $('#nounMode').onclick=()=>{nounEnabled=!nounEnabled;nounRevealed=false;$('#nounMode').textContent=nounEnabled?'关闭名词听写':'开启名词听写';if(nounEnabled){practice=true;$('#sentenceMode').classList.add('selected');$('#continuousMode').classList.remove('selected');renderNounPanel();playSentence(sentenceIndex)}else renderNounPanel()};
 
-function vocabCategory(v){if(v.category==='corpus')return'corpus';if(v.category==='listeningNouns')return'nouns';return v.id?.startsWith('reading-')?'reading':'listening'}
+function vocabCategory(v){if(v.category==='manual')return'manual';if(v.category==='corpus')return'corpus';if(v.category==='listeningNouns')return'nouns';return v.id?.startsWith('reading-')?'reading':'listening'}
 renderVocab=function(){
-  const groups={reading:[],corpus:[],nouns:[],listening:[]};
+  const groups={reading:[],corpus:[],nouns:[],listening:[],manual:[]};
   for(const pair of Object.entries(vocab))groups[vocabCategory(pair[1])].push(pair);
-  const tabs=[['reading','阅读生词汇'],['corpus','听力语料库'],['nouns','听力名词'],['listening','其他听力生词']];
+  const tabs=[['reading','阅读生词汇'],['corpus','听力语料库'],['nouns','听力名词'],['listening','其他听力生词'],['manual','自行添加']];
   $('#special').innerHTML=`<div class="intro"><div class="eyebrow">COLLECT. REVISIT. REMEMBER.</div><h1>我的生词本</h1><p>原有收藏已按来源显示；所有记录仍保存在当前浏览器。</p></div><div class="vocab-tabs">${tabs.map(([id,label])=>`<button data-vocab-tab="${id}" class="${activeVocabTab===id?'selected':''}">${label} <small>${groups[id].length}</small></button>`).join('')}</div><div id="vocabList"></div>`;
   const show=()=>{$$('#special [data-vocab-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.vocabTab===activeVocabTab));$('#vocabList').innerHTML=groups[activeVocabTab].map(([k,v])=>`<div class="vocabentry"><strong>${esc(v.word)}</strong> <span class="phonetic">${esc(v.phonetic?'/'+v.phonetic+'/':'')}</span><small>${esc(v.title||v.id)}</small><p>${esc(v.note||v.meaning||'暂无词义笔记')}</p><blockquote>${esc(v.sentence)}</blockquote><div class="actions"><button data-return="${esc(v.id)}">回到原文 ↗</button><button data-pronounce="${esc(v.word)}">♪ 读音</button><button data-remove="${esc(k)}">移除</button></div></div>`).join('')||'<div class="empty">这个分类还没有收藏。</div>'};
   $$('#special [data-vocab-tab]').forEach(b=>b.onclick=()=>{activeVocabTab=b.dataset.vocabTab;show()});show();

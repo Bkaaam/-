@@ -1,5 +1,5 @@
-const SHELL='ielts-shell-v4.0';
-const FILES=['./','./index.html','./fast.js?v=4.0','./app.js?v=4.0','./topics.js?v=4.0','./upgrade.js?v=4.0','./style.css?v=4.0','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
+const SHELL='ielts-shell-v4.1';
+const FILES=['./','./index.html','./fast.js?v=4.1','./app.js?v=4.1','./topics.js?v=4.1','./upgrade.js?v=4.1','./study-tools.js?v=4.1','./style.css?v=4.1','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('ielts-shell-')&&k!==SHELL).map(k=>caches.delete(k))))]))});
 self.addEventListener('fetch',e=>{
