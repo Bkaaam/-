@@ -50,14 +50,17 @@ async function unlockFast(e){
     if(!crypto.subtle)throw Error('请使用 HTTPS 打开网站');
     if(!warmConfig)primeLibrary();
     const config=await warmConfig;
-    const material=await crypto.subtle.importKey('raw',new TextEncoder().encode($('#password').value),'PBKDF2',false,['deriveKey']);
-    const candidate=await crypto.subtle.deriveKey({name:'PBKDF2',salt:base64bytes(config.salt),iterations:config.iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
+    const material=await crypto.subtle.importKey('raw',new TextEncoder().encode($('#password').value),'PBKDF2',false,['deriveBits']);
+    const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:base64bytes(config.salt),iterations:config.iterations,hash:'SHA-256'},material,256);
+    const candidate=await crypto.subtle.importKey('raw',bits,'AES-GCM',false,['decrypt']);
+    const candidateStreamKey=await crypto.subtle.importKey('raw',bits,'AES-CTR',false,['decrypt']);
+    new Uint8Array(bits).fill(0);
     status.textContent='正在打开目录…';
     const r=await warmCatalog;let raw;
     try{raw=await decrypt(await r.clone().arrayBuffer(),candidate)}catch(error){if(error.name==='OperationError')throw Error('密码不正确，请重新输入');throw error}
     const data=JSON.parse(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
-    key=candidate;library=data;library.pronunciation={words:{}};items=data.items;dictionary={};dictionaryTask=pronunciationTask=null;
-    $('#password').value='';$('#gate').hidden=true;$('#app').hidden=false;status.textContent='';await navigate(location.hash==='#topics'?'topics':'reading');
+    key=candidate;streamKey=candidateStreamKey;library=data;library.pronunciation={words:{}};items=data.items;dictionary={};dictionaryTask=pronunciationTask=null;
+    $('#password').value='';$('#gate').hidden=true;$('#app').hidden=false;status.textContent='';await navigate('reading');
   }catch(error){status.textContent=error.message||'暂时无法打开，请重试';if(!key){warmConfig=null;warmCatalog=null}}
   finally{button.disabled=false}
 }

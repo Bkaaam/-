@@ -89,19 +89,23 @@ function renderNounPanel(){
     const answers=$('#nounInput').value.trim().split(/[\s,，;；]+/).filter(Boolean);
     const clean=s=>s.toLowerCase().replace(/[^a-z]/g,'');
     const checks=nouns.map((n,i)=>clean(answers[i]||'')===clean(n.word));
-    nouns.forEach((n,i)=>{if(checks[i])return;const key=`noun|${current.id}|${n.charStart}`;vocab[key]={category:'listeningNouns',word:n.word.toLowerCase(),id:current.id,char:n.charStart,title:current.title,sentence:sentences[sentenceIndex].text.trim(),meaning:findEntry(n.word).entry?.translation||'',phonetic:findEntry(n.word).entry?.phonetic||'',note:'名词听写答错；原句见上。'};});
+    nouns.forEach((n,i)=>{if(checks[i])return;const key=`noun|${current.id}|${n.charStart}`;vocab[key]={category:'corpus',word:n.word.toLowerCase(),id:current.id,char:n.charStart,title:current.title,sentence:sentences[sentenceIndex].text.trim(),meaning:findEntry(n.word).entry?.translation||'',phonetic:findEntry(n.word).entry?.phonetic||'',note:'名词听写答错；原句见上。'};});
     if(checks.some(x=>!x))scheduleSave();
-    $('#nounResult').innerHTML=`<p>${checks.map((ok,i)=>`<span class="noun-check ${ok?'correct':'incorrect'}">${esc(nouns[i].word)} ${ok?'✓ 正确':'✗ 应写为 '+esc(nouns[i].word)}</span>`).join('')}</p><blockquote>${annotatedSentence(sentenceIndex,nouns)}</blockquote>${checks.some(x=>!x)?'<p>答错的名词已加入“听力名词”。</p>':''}`;
+    $('#nounResult').innerHTML=`<p>${checks.map((ok,i)=>`<span class="noun-check ${ok?'correct':'incorrect'}">${esc(nouns[i].word)} ${ok?'✓ 正确':'✗ 应写为 '+esc(nouns[i].word)}</span>`).join('')}</p><blockquote>${annotatedSentence(sentenceIndex,nouns)}</blockquote>${checks.some(x=>!x)?'<p>答错的名词已加入“听力语料库”。</p>':''}`;
   };
 }
 $('#nounMode').onclick=()=>{nounEnabled=!nounEnabled;nounRevealed=false;$('#nounMode').textContent=nounEnabled?'关闭名词听写':'开启名词听写';if(nounEnabled){practice=true;$('#sentenceMode').classList.add('selected');$('#continuousMode').classList.remove('selected');renderNounPanel();playSentence(sentenceIndex)}else renderNounPanel()};
 
-function vocabCategory(v){if(v.category==='manual')return'manual';if(v.category==='corpus')return'corpus';if(v.category==='listeningNouns')return'nouns';return v.id?.startsWith('reading-')?'reading':'listening'}
+function vocabCategory(v){
+  if(v.notebook==='reading'||v.notebook==='corpus')return v.notebook;
+  if(v.category==='manual')return v.id?.startsWith('listening-')?'corpus':'reading';
+  return v.category==='corpus'||v.category==='listeningNouns'||v.id?.startsWith('listening-')?'corpus':'reading';
+}
 renderVocab=function(){
-  const groups={reading:[],corpus:[],nouns:[],listening:[],manual:[]};
+  if(!['reading','corpus'].includes(activeVocabTab))activeVocabTab=activeVocabTab==='manual'?'reading':'corpus';
+  const groups={reading:[],corpus:[]};
   for(const pair of Object.entries(vocab))groups[vocabCategory(pair[1])].push(pair);
-  const tabs=[['reading','阅读生词汇'],['corpus','听力语料库'],['nouns','听力名词'],['listening','其他听力生词'],['manual','自行添加']];
-  $('#special').innerHTML=`<div class="intro"><div class="eyebrow">COLLECT. REVISIT. REMEMBER.</div><h1>我的生词本</h1><p>原有收藏已按来源显示；所有记录仍保存在当前浏览器。</p></div><div class="vocab-tabs">${tabs.map(([id,label])=>`<button data-vocab-tab="${id}" class="${activeVocabTab===id?'selected':''}">${label} <small>${groups[id].length}</small></button>`).join('')}</div><div id="vocabList"></div>`;
-  const show=()=>{$$('#special [data-vocab-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.vocabTab===activeVocabTab));$('#vocabList').innerHTML=groups[activeVocabTab].map(([k,v])=>`<div class="vocabentry"><strong>${esc(v.word)}</strong> <span class="phonetic">${esc(v.phonetic?'/'+v.phonetic+'/':'')}</span><small>${esc(v.title||v.id)}</small><p>${esc(v.note||v.meaning||'暂无词义笔记')}</p><blockquote>${esc(v.sentence)}</blockquote><div class="actions"><button data-return="${esc(v.id)}">回到原文 ↗</button><button data-pronounce="${esc(v.word)}">♪ 读音</button><button data-remove="${esc(k)}">移除</button></div></div>`).join('')||'<div class="empty">这个分类还没有收藏。</div>'};
-  $$('#special [data-vocab-tab]').forEach(b=>b.onclick=()=>{activeVocabTab=b.dataset.vocabTab;show()});show();
+  const tabs=[['reading','阅读生词汇'],['corpus','听力语料库']];
+  $('#special').innerHTML=`<div class="intro"><div class="eyebrow">COLLECT. REVISIT. REMEMBER.</div><h1>我的生词本</h1><p>现有收藏全部保留；手动添加会存入当前选中的词库。</p></div><div class="vocab-tabs">${tabs.map(([id,label])=>`<button data-vocab-tab="${id}" class="${activeVocabTab===id?'selected':''}">${label} <small>${groups[id].length}</small></button>`).join('')}</div><div id="vocabList"></div>`;
+  $('#vocabList').innerHTML=groups[activeVocabTab].map(([k,v])=>`<div class="vocabentry" data-vocab-key="${esc(k)}"><strong>${esc(v.word)}</strong> <span class="phonetic">${esc(v.phonetic?'/'+v.phonetic+'/':'')}</span><small>${esc(v.title||'手动添加')}</small><p>${esc(v.meaning||'暂无词义')}</p>${v.note?`<p>${esc(v.note)}</p>`:''}<blockquote>${esc(v.sentence||'')}</blockquote><div class="actions">${items.some(c=>c.id===v.id)?`<button data-return="${esc(v.id)}">回到原文 ↗</button>`:''}<button data-pronounce="${esc(v.word)}">♪ 读音</button><button data-remove="${esc(k)}">移除</button></div></div>`).join('')||'<div class="empty">这个词库还没有收藏，可以在下方自行添加。</div>';
 };

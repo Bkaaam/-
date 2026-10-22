@@ -1,7 +1,7 @@
 'use strict';
 // All personal edits stay in the existing IndexedDB notes/vocab records.
 const studyReader=renderReader, studyNavigate=navigate, studyText=renderText, studyVocab=renderVocab;
-const studyTopicLearn=renderTopicLearn, studyTopicQuestion=renderTopicQuestion;
+
 const openedChapter={reading:null,listening:null};
 let selectionSnapshot=null, selectionDebounce=0, annotationTarget=null;
 const highlightColors={yellow:'黄色',green:'绿色',pink:'粉色',blue:'蓝色'};
@@ -145,7 +145,7 @@ function decorateParagraphs(article){
     const sentenceIndex=sentences.findIndex(s=>s.charEnd>paragraph.charStart);
     const first=article.querySelector(`.sentence[data-sentence="${sentenceIndex}"]`);if(!first)return;
     const heading=document.createElement('div');heading.className='paragraph-heading';
-    heading.innerHTML=`<strong>第 ${index+1} 段</strong><span>${esc(paragraph.summary||'')}</span>`;
+    heading.innerHTML=`<strong>第 ${index+1} 段</strong><details class="paragraph-overview"><summary>查看本段概述</summary><p>${esc(paragraph.summary||'')}</p></details>`;
     first.before(heading);
   });
   if(current.paragraphsReconstructed){const note=document.createElement('p');note.className='paragraph-recovery-note';note.textContent='此篇扫描原文没有保留可靠空行，段落按句群重建；内容顺序与原文一致。';article.prepend(note)}
@@ -179,17 +179,7 @@ function renderAudioQuality(chapter){
     notes.audioQuality=$('#audioQuality').value;saveProgress();scheduleSave();renderReader(chapter.id);
   };
 }
-$('#downloadAudio').onclick=async()=>{
-  if(!current?.audio)return;
-  const chapter=current,button=$('#downloadAudio');button.disabled=true;button.textContent='正在缓存…';
-  try{
-    const response=await cachedAsset(chapter.audio.url);
-    if(response.headers.get('X-IELTS-Cached')!=='1')await(await caches.open(MEDIA_CACHE)).put(new URL(chapter.audio.url,location.href),response.clone());
-    if(current?.id===chapter.id)button.textContent='已缓存 ✓';
-    toast('本节音频已保存到当前浏览器');
-  }catch{toast('缓存未完成，请检查网络或可用存储空间')}
-  finally{button.disabled=false}
-};
+$('#downloadAudio').onclick=()=>cacheListeningAudio();
 function renderSummary(chapter){
   $('#articleSummary')?.remove();
   const panel=document.createElement('section');panel.id='articleSummary';panel.className='article-summary panel';
@@ -200,6 +190,7 @@ function renderSummary(chapter){
 navigate=async function(next){
   selectionPill.hidden=true;selectionSnapshot=null;clearTimeout(selectionDebounce);
   if(current?.id)openedChapter[current.type]=current.id;
+  if(next==='topics')next='reading';
   await studyNavigate(next);
   const target=openedChapter[next];
   if(target&&['reading','listening'].includes(next))await renderReader(target);
@@ -209,9 +200,6 @@ $('#back').onclick=async()=>{const type=current?.type||view;openedChapter[type]=
 function decorateSpecial(selector,scope,getSource,getAnchor){
   document.querySelectorAll(selector).forEach((node,i)=>annotateBlock(node,scope,getSource(node,i),getAnchor(node,i)));
 }
-renderTopicLearn=function(){studyTopicLearn();decorateSpecial('#topicMain .topic-entry','topic',()=>topicSource,(_,i)=>topicEntries()[i]?.id||String(i))};
-renderTopicQuestion=function(){studyTopicQuestion();if(topicExercise)decorateSpecial('#topicMain .quiz-card','topic',()=>topicSource,()=>topicExercise.pool[topicExercise.index]?.id||'end')};
-
 function manualEntryForm(){
   const panel=document.createElement('form');panel.id='manualWordForm';panel.className='panel manual-word-form';
   panel.innerHTML='<h2>自行添加生词</h2><label>英文单词或短语<input name="word" required maxlength="100" placeholder="例如 accommodation"></label><label>中文含义<input name="meaning" maxlength="300" placeholder="写下你要记的意思"></label><label>例句 / 来源<input name="sentence" maxlength="800" placeholder="可填写例句，也可以写学习来源"></label><label>我的笔记<textarea name="note" rows="2" maxlength="1000"></textarea></label><button class="primary" type="submit">加入生词本</button>';
@@ -219,22 +207,26 @@ function manualEntryForm(){
     e.preventDefault();const data=new FormData(panel),word=String(data.get('word')||'').trim();if(!word)return;
     const key=`manual|${Date.now()}|${Math.random().toString(36).slice(2,6)}`;
     const entry=findEntry(word).entry;
-    vocab[key]={category:'manual',word,id:key,title:'手动添加',sentence:String(data.get('sentence')||'').trim(),meaning:String(data.get('meaning')||'').trim()||entry?.translation||'',phonetic:entry?.phonetic||'',note:String(data.get('note')||'').trim()};
-    activeVocabTab='manual';scheduleSave();renderVocab();toast('已加入手动生词');
+    vocab[key]={category:activeVocabTab,notebook:activeVocabTab,word,id:key,title:'手动添加',sentence:String(data.get('sentence')||'').trim(),meaning:String(data.get('meaning')||'').trim()||entry?.translation||'',phonetic:entry?.phonetic||'',note:String(data.get('note')||'').trim()};
+    scheduleSave();renderVocab();toast('已加入当前词库');
   };
   return panel;
 }
 renderVocab=function(){
-  studyVocab();
-  const special=$('#special'),tabs=special.querySelector('.vocab-tabs');
-  if(!tabs)return;
-  tabs.querySelectorAll('[data-vocab-tab]').forEach(button=>{button.onclick=()=>{activeVocabTab=button.dataset.vocabTab;renderVocab()}});
-  tabs.after(manualEntryForm());
-  if(activeVocabTab==='manual'){
-    const rows=Object.entries(vocab).filter(([,v])=>v.category==='manual');
-    $('#vocabList').innerHTML=rows.map(([k,v])=>`<div class="vocabentry" data-manual="${esc(k)}"><strong>${esc(v.word)}</strong> <span class="phonetic">${esc(v.phonetic?'/'+v.phonetic+'/':'')}</span><small>手动添加</small><p>${esc(v.meaning||'暂无含义')}</p><blockquote>${esc(v.sentence||'暂无例句')}</blockquote><p>${esc(v.note||'')}</p><div class="actions"><button data-pronounce="${esc(v.word)}">♪ 读音</button><button data-remove="${esc(k)}">移除</button></div></div>`).join('')||'<div class="empty">还没有手动添加的生词。</div>';
+  let migrated=false;
+  for(const row of annotationRows()){
+    if(row.scope!=='vocab'||['reading','corpus'].includes(row.source))continue;
+    row.legacySource||=row.source;
+    row.source=vocab[row.anchor]?vocabCategory(vocab[row.anchor]):row.source==='manual'?'reading':'corpus';
+    row.key=annotationKey('vocab',row.source,row.anchor);migrated=true;
   }
-  decorateSpecial('#vocabList .vocabentry','vocab',()=>activeVocabTab,(node,i)=>node.dataset.manual||Object.entries(vocab).filter(([,v])=>activeVocabTab==='reading'?v.id?.startsWith('reading-'):activeVocabTab==='corpus'?v.category==='corpus':activeVocabTab==='nouns'?v.category==='listeningNouns':v.id?.startsWith('listening-'))[i]?.[0]||String(i));
+  if(migrated)scheduleSave();
+  studyVocab();
+  const tabs=$('#special .vocab-tabs');if(!tabs)return;
+  tabs.querySelectorAll('[data-vocab-tab]').forEach(button=>{button.onclick=()=>{activeVocabTab=button.dataset.vocabTab;renderVocab()}});
+  const form=manualEntryForm();form.querySelector('h2').textContent=`添加到${activeVocabTab==='reading'?'阅读生词汇':'听力语料库'}`;
+  tabs.after(form);
+  decorateSpecial('#vocabList .vocabentry','vocab',()=>activeVocabTab,node=>node.dataset.vocabKey);
 };
 
 const selectionPill=document.createElement('div');selectionPill.id='selectionActions';selectionPill.hidden=true;
