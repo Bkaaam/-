@@ -5,6 +5,93 @@ function clearTopics(){}
 let streamManifestTask=null,activeStream=null,streamKey=null;
 const streamMetadata=new Map();
 const streamSessions=new Map();
+const failedStreamTracks=new Set(),originalAudioRecovery=new Set();
+let activePlayback=null,audioStartTimer=0;
+function isMiBrowser(){return /MiuiBrowser|MiBrowser|XiaoMi|Mint Browser/i.test(navigator.userAgent||'')}
+function wantsCompatibleAudio(id){return failedStreamTracks.has(id)||notes.audioPlayback==='compatible'||(notes.audioPlayback!=='stream'&&isMiBrowser())}
+function renderPlaybackOptions(chapter){
+  let panel=$('#playbackOptions');
+  if(!panel){panel=document.createElement('div');panel.id='playbackOptions';panel.className='playback-options';panel.innerHTML='<label>播放方式 <select id="audioPlayback"><option value="auto">自动适配浏览器</option><option value="compatible">兼容播放（小米推荐）</option><option value="stream">边听边缓存</option></select></label><p id="playbackStatus" role="status"></p><button id="retryListening" hidden>重新加载音频</button>';$('#listeningTools').append(panel)}
+  $('#audioPlayback').value=notes.audioPlayback||'auto';
+  $('#audioPlayback').onchange=()=>{saveProgress();notes.audioPlayback=$('#audioPlayback').value;failedStreamTracks.delete(chapter.id);originalAudioRecovery.delete(chapter.id);scheduleSave();renderReader(chapter.id)};
+  $('#retryListening').hidden=true;
+  $('#retryListening').onclick=()=>{failedStreamTracks.add(chapter.id);renderReader(chapter.id)};
+  $('#playbackStatus').textContent=wantsCompatibleAudio(chapter.id)?'兼容模式：录音下载解密完成后播放，下载一次可重复听。':'正在准备原声；流式加载失败时会自动切换兼容播放。';
+  $('#systemAudio').open=isMiBrowser()||notes.audioPlayback==='compatible';
+}
+async function completeCachedRecording(meta,signal){
+  const cache=await caches.open('ielts-audio-chunks-v2'),url=new URL(meta.url,location.href).href;
+  const responses=await Promise.all(Array.from({length:meta.chunks},(_,i)=>cache.match(url+'?chunk='+i)));
+  if(responses.some(r=>!r))return null;
+  const parts=await Promise.all(responses.map(r=>r.arrayBuffer()));
+  const tagKey=url+'?gcm-tag=1';let response=await cache.match(tagKey),tag;
+  if(response)tag=new Uint8Array(await response.arrayBuffer());
+  else{
+    response=await fetch(url,{headers:{Range:`bytes=${meta.bytes+12}-${meta.bytes+27}`},signal});if(!response.ok)throw Error('Audio tag '+response.status);
+    tag=new Uint8Array(await response.arrayBuffer());if(response.status===200)tag=tag.slice(meta.bytes+12,meta.bytes+28);
+    if(tag.length!==16)throw Error('Incomplete audio tag');
+    cache.put(tagKey,new Response(tag)).catch(()=>{});
+  }
+  const sealed=new Uint8Array(meta.bytes+28);sealed.set(meta.iv);
+  for(let i=0;i<parts.length;i++){
+    if(parts[i].byteLength!==Math.min(meta.chunkSize,meta.bytes-i*meta.chunkSize))return null;
+    sealed.set(new Uint8Array(parts[i]),12+i*meta.chunkSize);
+  }
+  sealed.set(tag,12+meta.bytes);return sealed;
+}
+async function compatibleAudioSource(chapter,signal){
+  const encryptionKey=key,url=new URL(chapter.audio.url,location.href).href;
+  const progress=n=>{if(current?.id===chapter.id)$('#trackTitle').textContent=`兼容播放 · 下载 ${Math.min(100,Math.round(n/(chapter.audio.bytes+28)*100))}%`};
+  let cache;try{cache=await caches.open(MEDIA_CACHE)}catch{}
+  const decode=async bytes=>{
+    const raw=await decrypt(bytes,encryptionKey);
+    if(signal.aborted||key!==encryptionKey)throw new DOMException('Aborted','AbortError');
+    return URL.createObjectURL(new Blob([raw],{type:'audio/mpeg'}));
+  };
+  if(cache){const hit=await cache.match(url);if(hit)try{return await decode(await hit.arrayBuffer())}catch(error){if(signal.aborted)throw error;await cache.delete(url)}}
+  // Reuse previously downloaded encrypted chunks without relying on AES-CTR or a worker media URL.
+  try{const meta=await streamDescription(chapter.audio.url);if(meta){const bytes=await completeCachedRecording(meta,signal);if(bytes){const source=await decode(bytes);if(cache)cache.put(url,new Response(bytes)).catch(()=>{});return source}}}catch(error){if(signal.aborted)throw error}
+  for(let attempt=0;attempt<2;attempt++)try{
+    const response=await cachedAsset(chapter.audio.url,{signal,progress});
+    const source=await decode(await response.arrayBuffer());return source;
+  }catch(error){if(signal.aborted||attempt===1)throw error;if(cache)await cache.delete(url)}
+}
+function recordPlayback(chapter,source,mode){
+  activePlayback={id:chapter.id,path:chapter.audio.url,source,mode};
+  return source;
+}
+function watchAudioStart(){
+  clearTimeout(audioStartTimer);
+  if(activePlayback?.mode!=='stream')return;
+  const source=activePlayback.source;
+  audioStartTimer=setTimeout(()=>{if(activePlayback?.source===source&&audio.readyState<1)handleListeningFailure()},14000);
+}
+function handleListeningFailure(){
+  const playback=activePlayback;
+  if(!playback||current?.id!==playback.id||audio.getAttribute('src')!==playback.source)return;
+  clearTimeout(audioStartTimer);saveProgress();activePlayback=null;
+  if(playback.mode==='stream'){
+    failedStreamTracks.add(playback.id);toast('正在自动切换兼容播放…');renderReader(playback.id);return;
+  }
+  if(current.audioFast?.url===playback.path&&current.audioOriginal?.url!==playback.path&&!originalAudioRecovery.has(playback.id)){
+    originalAudioRecovery.add(playback.id);failedStreamTracks.add(playback.id);toast('正在尝试原音质兼容播放…');renderReader(playback.id);return;
+  }
+  $('#play').disabled=true;$('#trackTitle').textContent='录音暂未能播放';
+  if($('#playbackStatus'))$('#playbackStatus').textContent='请点击重新加载，也可以展开底部系统播放器重试。';
+  if($('#retryListening'))$('#retryListening').hidden=false;
+}
+function listeningLoadFailed(id,version){
+  if(current?.id!==id||version!==requestVersion)return;
+  $('#trackTitle').textContent='录音加载未完成';
+  if($('#playbackStatus'))$('#playbackStatus').textContent='请保持页面打开并重试；已保存的生词和进度不受影响。';
+  if($('#retryListening'))$('#retryListening').hidden=false;
+}
+function fitAudioPanel(){
+  const player=$('#player');if(player&&!player.hidden)document.documentElement.style.setProperty('--audio-panel-height',player.offsetHeight+'px');
+}
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(fitAudioPanel).observe($('#player'));
+window.addEventListener('resize',fitAudioPanel);
+$('#systemAudio').addEventListener('toggle',fitAudioPanel);
 async function streamManifest(){
   if(!streamManifestTask)streamManifestTask=cachedAsset('audio-streams-v2.json').then(r=>r.json()).catch(e=>{streamManifestTask=null;throw e});
   return streamManifestTask;
@@ -63,7 +150,8 @@ async function decodeAudioChunk(meta,index,bytes){
   return crypto.subtle.decrypt({name:'AES-CTR',counter,length:32},streamKey,bytes);
 }
 async function listeningSource(chapter,signal){
-  const meta=await streamDescription(chapter.audio.url);
+  if(wantsCompatibleAudio(chapter.id))return recordPlayback(chapter,await compatibleAudioSource(chapter,signal),'compatible');
+  let meta;try{meta=await streamDescription(chapter.audio.url)}catch(error){if(signal.aborted)throw error}
   if(meta){
     const worker=await audioWorker();
     if(signal.aborted)throw new DOMException('Aborted','AbortError');
@@ -71,26 +159,23 @@ async function listeningSource(chapter,signal){
       const id=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);
       const session={id,meta,key:streamKey};streamSessions.set(id,session);activeStream=session;
       $('#downloadAudio').textContent='准备边听边缓存';
-      return new URL('__audio_stream__/'+id+'.mp3',location.href).href;
+      return recordPlayback(chapter,new URL('__audio_stream__/'+id+'.mp3',location.href).href,'stream');
     }
-    // Older browsers still work; decrypt the same chunks into a local Blob.
-    const chunks=[];
-    for(let i=0;i<meta.chunks;i++){
-      const raw=await pageAudioChunk(meta,i,signal);
-      chunks.push(await decodeAudioChunk(meta,i,raw));$('#trackTitle').textContent=`原声下载 ${Math.round((i+1)/meta.chunks*100)}%`;
-    }
-    return URL.createObjectURL(new Blob(chunks,{type:'audio/mpeg'}));
+    return recordPlayback(chapter,await compatibleAudioSource(chapter,signal),'compatible');
   }
-  const response=await cachedAsset(chapter.audio.url,{signal,progress:n=>{$('#trackTitle').textContent=`原声下载 ${Math.min(100,Math.round(n/(chapter.audio.bytes+28)*100))}%`}});
-  return URL.createObjectURL(new Blob([await decrypt(await response.arrayBuffer())],{type:chapter.audio.mime||'audio/mpeg'}));
+  return recordPlayback(chapter,await compatibleAudioSource(chapter,signal),'compatible');
 }
 function beginStreamDownload(){
+  clearTimeout(audioStartTimer);
+  if($('#playbackStatus'))$('#playbackStatus').textContent=activePlayback?.mode==='stream'?'已就绪 · 边听边缓存':originalAudioRecovery.has(current?.id)?'已就绪 · 原音质兼容播放':'已就绪 · 兼容播放，可反复收听';
+  if(activePlayback?.mode==='compatible')$('#downloadAudio').textContent='已缓存 ✓';
   if(activeStream&&navigator.serviceWorker.controller){
     navigator.serviceWorker.controller.postMessage({type:'audio-cache',id:activeStream.id,meta:activeStream.meta});
     $('#downloadAudio').textContent='边听边缓存…';
   }
 }
 function stopStreamDownload(){
+  clearTimeout(audioStartTimer);activePlayback=null;
   if(activeStream)navigator.serviceWorker?.controller?.postMessage({type:'audio-cache-stop',id:activeStream.id});
   activeStream=null;streamSessions.clear();
 }

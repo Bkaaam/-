@@ -159,12 +159,12 @@ renderReader=function(id){
     openedChapter[match.type]=id;
     if(match.type==='listening'){
       match.audioOriginal||=match.audio;
-      match.audio=notes.audioQuality==='original'?match.audioOriginal:(match.audioFast||match.audioOriginal);
+      match.audio=notes.audioQuality==='original'||originalAudioRecovery.has(id)?match.audioOriginal:(match.audioFast||match.audioOriginal);
     }
   }
   const outcome=studyReader(id);
   if(match?.type==='reading')renderSummary(match);
-  if(match?.type==='listening')renderAudioQuality(match);
+  if(match?.type==='listening'){renderAudioQuality(match);renderPlaybackOptions(match)}
   return outcome;
 };
 function renderAudioQuality(chapter){
@@ -174,9 +174,9 @@ function renderAudioQuality(chapter){
     label.innerHTML='音频版本 <select id="audioQuality"><option value="fast">省流量 · 先播放</option><option value="original">原音质</option></select>';
     $('#listeningTools .modebar').append(label);
   }
-  $('#audioQuality').value=notes.audioQuality==='original'?'original':'fast';
+  $('#audioQuality').value=chapter.audio===chapter.audioOriginal?'original':'fast';
   $('#audioQuality').onchange=()=>{
-    notes.audioQuality=$('#audioQuality').value;saveProgress();scheduleSave();renderReader(chapter.id);
+    originalAudioRecovery.delete(chapter.id);notes.audioQuality=$('#audioQuality').value;saveProgress();scheduleSave();renderReader(chapter.id);
   };
 }
 $('#downloadAudio').onclick=()=>cacheListeningAudio();
@@ -207,7 +207,7 @@ function manualEntryForm(){
     e.preventDefault();const data=new FormData(panel),word=String(data.get('word')||'').trim();if(!word)return;
     const key=`manual|${Date.now()}|${Math.random().toString(36).slice(2,6)}`;
     const entry=findEntry(word).entry;
-    vocab[key]={category:activeVocabTab,notebook:activeVocabTab,word,id:key,title:'手动添加',sentence:String(data.get('sentence')||'').trim(),meaning:String(data.get('meaning')||'').trim()||entry?.translation||'',phonetic:entry?.phonetic||'',note:String(data.get('note')||'').trim()};
+    vocab[key]={category:activeVocabTab,notebook:activeVocabTab,manualMigrationVersion:1,word,id:key,title:'手动添加',sentence:String(data.get('sentence')||'').trim(),meaning:String(data.get('meaning')||'').trim()||entry?.translation||'',phonetic:entry?.phonetic||'',note:String(data.get('note')||'').trim()};
     scheduleSave();renderVocab();toast('已加入当前词库');
   };
   return panel;

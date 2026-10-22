@@ -96,12 +96,30 @@ function renderNounPanel(){
 }
 $('#nounMode').onclick=()=>{nounEnabled=!nounEnabled;nounRevealed=false;$('#nounMode').textContent=nounEnabled?'关闭名词听写':'开启名词听写';if(nounEnabled){practice=true;$('#sentenceMode').classList.add('selected');$('#continuousMode').classList.remove('selected');renderNounPanel();playSentence(sentenceIndex)}else renderNounPanel()};
 
+function migrateManualToListening(){
+  const migrated=[];
+  for(const [id,entry] of Object.entries(vocab)){
+    if(entry.manualMigrationVersion===1)continue;
+    if(entry.category!=='manual'&&!id.startsWith('manual|')&&!entry.id?.startsWith('manual|'))continue;
+    entry.previousNotebook??=entry.notebook||entry.category||'manual';
+    entry.category='corpus';entry.notebook='corpus';entry.manualMigrationVersion=1;migrated.push(id);
+  }
+  const ids=new Set(migrated);
+  for(const row of notes.highlights||[]){
+    if(row.scope==='vocab'&&ids.has(row.anchor)){
+      row.legacySource||=row.source;row.source='corpus';row.key=`vocab|corpus|${row.anchor}`;
+    }
+  }
+  if(migrated.length){notes.migrations||={};notes.migrations.manualToListeningV1={at:new Date().toISOString(),keys:migrated};scheduleSave()}
+  return migrated.length;
+}
 function vocabCategory(v){
   if(v.notebook==='reading'||v.notebook==='corpus')return v.notebook;
-  if(v.category==='manual')return v.id?.startsWith('listening-')?'corpus':'reading';
+  if(v.category==='manual')return'corpus';
   return v.category==='corpus'||v.category==='listeningNouns'||v.id?.startsWith('listening-')?'corpus':'reading';
 }
 renderVocab=function(){
+  migrateManualToListening();
   if(!['reading','corpus'].includes(activeVocabTab))activeVocabTab=activeVocabTab==='manual'?'reading':'corpus';
   const groups={reading:[],corpus:[]};
   for(const pair of Object.entries(vocab))groups[vocabCategory(pair[1])].push(pair);
