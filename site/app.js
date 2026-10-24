@@ -6,7 +6,18 @@ let key=null,library=null,dictionary={},items=[],view='reading',current=null,sel
 const examNotes={charge:'charge：费用、收费；in charge of 表示负责。听到金额时留意收费对象。',deposit:'deposit：听力住宿或预订场景常指押金；地质阅读也可指沉积物。',accommodation:'accommodation：住宿，通常作不可数名词。',available:'available：有空的、可获得的；在预订场景常指还有空位或可用时间。',significant:'significant：重要的、显著的；研究语境还可能指有统计显著性。',approach:'approach：可表示方法，也可表示接近。an approach to 后常接名词或动名词。',evidence:'evidence：证据，通常不可数；注意证据支持的结论范围。',species:'species：物种，单复数同形。',reserve:'reserve：预订、保留；nature reserve 则指自然保护区。',decline:'decline：下降、衰退；decline an offer 则表示婉拒。'};
 function toast(msg){$('#toast').textContent=msg;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),3800)}
 function req(r){return new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-async function saveState(){if(!db)return;await new Promise((resolve,reject)=>{const tx=db.transaction('state','readwrite'),s=tx.objectStore('state');s.put(notes,'notes');s.put(vocab,'vocab');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+async function saveState(options={}){
+  if(!db){if(options.requireStorage){const error=new Error('Local storage unavailable');error.name='StorageUnavailableError';throw error}return}
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction('state','readwrite'),store=tx.objectStore('state');let timer=null,timedOut=false;
+    const done=error=>{clearTimeout(timer);error?reject(error):resolve()};
+    tx.oncomplete=()=>done();
+    tx.onerror=()=>done(tx.error||new Error('Save failed'));
+    tx.onabort=()=>{if(timedOut){const error=new Error('Local save timed out');error.name='TimeoutError';done(error)}else done(tx.error||new Error('Save aborted'))};
+    if(options.timeoutMs)timer=setTimeout(()=>{timedOut=true;try{tx.abort()}catch{const error=new Error('Local save timed out');error.name='TimeoutError';done(error)}},options.timeoutMs);
+    store.put(notes,'notes');store.put(vocab,'vocab');
+  });
+}
 function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveState().catch(()=>toast('本机进度保存失败，请检查存储空间')),600)}
 function normalizedPhonetic(s){return String(s||'').replace(/ә:/g,'ɜː').replace(/ә/g,'ə').replace(/:/g,'ː').replace(/'/g,'ˈ')}
 function base64bytes(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}

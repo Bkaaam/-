@@ -98,3 +98,12 @@ body.has-player main{padding-bottom:calc(var(--audio-panel-height,170px) + 80px)
 .transcript-editor-actions button{flex:1;min-height:44px;font-size:14px}
 #transcriptSaveStatus{color:var(--green);font-size:13px}#editTranscript{min-height:40px}
 @media(max-width:700px){#transcriptEditor{width:100%;margin:auto auto 0;border-radius:16px 16px 0 0;padding:16px}.transcript-editor-actions{bottom:-16px}.transcript-row textarea{font-size:16px}}
+
+.transcript-editor-actions{flex-wrap:wrap}
+#transcriptSaveStatus{flex:0 0 100%;margin:0 0 6px;min-height:1.4em;line-height:1.5}
+#transcriptSaveStatus:empty{display:none}
+#transcriptSaveStatus[data-state=error]{color:#a22c24}
+#transcriptSaveStatus[data-state=saving]{font-weight:600}
+.transcript-row[data-invalid]{background:var(--soft);border-radius:8px;padding:14px 8px}
+.transcript-row [aria-invalid=true]{border:2px solid #a22c24}
+#exportTranscriptDraft{flex-basis:100%}

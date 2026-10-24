@@ -1,5 +1,5 @@
-const SHELL='ielts-shell-v4.7';
-const FILES=['./','./index.html','./fast.js?v=4.7','./app.js?v=4.7','./audio-download.js?v=4.7','./stream-player.js?v=4.7','./upgrade.js?v=4.7','./transcript-editor.js?v=4.7','./study-tools.js?v=4.7','./style.css?v=4.7','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
+const SHELL='ielts-shell-v4.8';
+const FILES=['./','./index.html','./fast.js?v=4.8','./app.js?v=4.8','./audio-download.js?v=4.8','./stream-player.js?v=4.8','./upgrade.js?v=4.8','./transcript-editor.js?v=4.8','./study-tools.js?v=4.8','./style.css?v=4.8','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
 const CHUNK_CACHE='ielts-audio-chunks-v2',chunkTasks=new Map(),downloads=new Map();
 self.addEventListener('install',e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('ielts-shell-')&&k!==SHELL).map(k=>caches.delete(k))))]))});

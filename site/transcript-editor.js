@@ -73,8 +73,33 @@ function renderTranscriptEditorButton(chapter){
   if(!button){button=document.createElement('button');button.id='editTranscript';button.textContent='编辑原文';$('#listeningTools .modebar').append(button)}
   button.onclick=()=>openTranscriptEditor(chapter);
 }
-let editingTranscriptId=null,draftSaveTimer=0;
-function transcriptEditorSegments(){return[...document.querySelectorAll('#transcriptRows .transcript-row')].map(row=>({text:row.querySelector('textarea').value,start:row.querySelector('[data-time=start]').value===''?null:Number(row.querySelector('[data-time=start]').value),end:row.querySelector('[data-time=end]').value===''?null:Number(row.querySelector('[data-time=end]').value)}))}
+let editingTranscriptId=null,draftSaveTimer=0,transcriptSaving=false;
+function validateTranscriptSegments(segments,duration=Infinity){
+  for(let i=0;i<segments.length;i++){
+    const s=segments[i],prefix=`第 ${i+1} 句：`;
+    if(!s.text.trim())return{index:i,field:'text',message:prefix+'文字为空，请填写后保存。'};
+    if(s.text.length>16000)return{index:i,field:'text',message:prefix+'内容过长，请缩短到 16000 字符以内。'};
+    if(s.start===null&&s.end===null)continue;
+    if(!Number.isFinite(s.start)||s.start<0)return{index:i,field:'start',message:prefix+'开始时间须为大于或等于 0 的秒数。'};
+    if(!Number.isFinite(s.end)||s.end<=s.start)return{index:i,field:'end',message:prefix+'结束时间须晚于开始时间；也可同时留空。'};
+    if(s.end>duration+0.5)return{index:i,field:'end',message:prefix+'结束时间超过了本段录音长度。'};
+  }
+  return null;
+}
+function transcriptStatus(message,state='info',problem=null){
+  const status=$('#transcriptSaveStatus');status.textContent=message;status.dataset.state=state;status.setAttribute('aria-live',state==='error'?'assertive':'polite');
+  for(const row of document.querySelectorAll('#transcriptRows .transcript-row')){row.removeAttribute('data-invalid');row.querySelectorAll('[aria-invalid]').forEach(el=>el.removeAttribute('aria-invalid'))}
+  if(problem){
+    const row=document.querySelectorAll('#transcriptRows .transcript-row')[problem.index];if(!row)return;
+    row.dataset.invalid='1';const input=problem.field==='text'?row.querySelector('textarea'):row.querySelector(`[data-time=${problem.field}]`);
+    if(problem.field!=='text')row.querySelector('details').open=true;
+    input?.setAttribute('aria-invalid','true');row.scrollIntoView({block:'center',behavior:'smooth'});input?.focus({preventScroll:true});
+  }
+}
+function transcriptEditorSegments(){return[...document.querySelectorAll('#transcriptRows .transcript-row')].map(row=>{
+  const parse=field=>{const input=row.querySelector(`[data-time=${field}]`);return input.validity.badInput?NaN:input.value===''?null:Number(input.value)};
+  return{text:row.querySelector('textarea').value,start:parse('start'),end:parse('end')};
+})}
 function storeTranscriptDraft(){
   if(!editingTranscriptId)return;notes.transcriptDrafts||={};notes.transcriptDrafts[editingTranscriptId]={segments:transcriptEditorSegments(),updatedAt:new Date().toISOString()};scheduleSave();
 }
@@ -84,32 +109,41 @@ function flushTranscriptEditor(){
 function openTranscriptEditor(chapter){
   audio.pause();const base=originalListeningScript(chapter);
   let dialog=$('#transcriptEditor');
-  if(!dialog){dialog=document.createElement('dialog');dialog.id='transcriptEditor';dialog.innerHTML='<div class="dialoghead"><h2>编辑听力原文</h2><button id="closeTranscript" aria-label="关闭编辑">×</button></div><p class="summary">每个文本框对应原来的一句，可直接纠正或补充文字。原声不变；需要时可展开调整该句的开始和结束秒数。改动仅保存在本浏览器，随学习记录一起备份。</p><form id="transcriptForm"><div id="transcriptRows"></div><p id="transcriptSaveStatus" role="status"></p><div class="transcript-editor-actions"><button type="button" id="cancelTranscript">保留草稿并关闭</button><button type="submit" id="saveTranscript" class="primary">保存修改</button></div></form>';document.body.append(dialog)}
+  if(!dialog){dialog=document.createElement('dialog');dialog.id='transcriptEditor';dialog.innerHTML='<div class="dialoghead"><h2>编辑听力原文</h2><button id="closeTranscript" aria-label="关闭编辑">×</button></div><p class="summary">每个文本框对应原来的一句，可直接纠正或补充文字。原声不变；需要时可展开调整该句的开始和结束秒数。改动仅保存在本浏览器，随学习记录一起备份。</p><form id="transcriptForm" novalidate><div id="transcriptRows"></div><div class="transcript-editor-actions"><p id="transcriptSaveStatus" role="status" aria-live="polite"></p><button type="button" id="exportTranscriptDraft" hidden>导出草稿备份</button><button type="button" id="cancelTranscript">保留草稿并关闭</button><button type="submit" id="saveTranscript" class="primary">保存修改</button></div></form>';document.body.append(dialog)}
   editingTranscriptId=chapter.id;
   const draft=notes.transcriptDrafts?.[chapter.id],edit=notes.transcriptEdits?.[chapter.id];
   const segments=draft?.segments||edit?.segments||base.rows.map(s=>({text:s.text.trim(),start:s.start,end:s.end}));
-  $('#transcriptRows').innerHTML=segments.map((s,i)=>`<section class="transcript-row"><label>第 ${i+1} 句<textarea rows="3" required maxlength="16000" spellcheck="false" autocapitalize="none">${esc(s.text)}</textarea></label><details><summary>调整本句原声时间</summary><div class="transcript-times"><label>开始（秒）<input data-time="start" type="number" min="0" step="0.01" value="${Number.isFinite(s.start)?s.start:''}"></label><label>结束（秒）<input data-time="end" type="number" min="0" step="0.01" value="${Number.isFinite(s.end)?s.end:''}"></label></div></details></section>`).join('');
-  $('#transcriptSaveStatus').textContent=draft?'已恢复上次编辑草稿。':'';
-  const close=()=>{clearTimeout(draftSaveTimer);storeTranscriptDraft();dialog.close();editingTranscriptId=null};
+  $('#transcriptRows').innerHTML=segments.map((s,i)=>`<section class="transcript-row"><label>第 ${i+1} 句<textarea rows="3" required maxlength="16000" spellcheck="false" autocapitalize="none">${esc(s.text)}</textarea></label><details><summary>调整本句原声时间</summary><div class="transcript-times"><label>开始（秒）<input data-time="start" type="number" inputmode="decimal" min="0" step="any" value="${Number.isFinite(s.start)?s.start:''}"></label><label>结束（秒）<input data-time="end" type="number" inputmode="decimal" min="0" step="any" value="${Number.isFinite(s.end)?s.end:''}"></label></div></details></section>`).join('');
+  transcriptStatus(draft?'已恢复上次编辑草稿。':'');$('#exportTranscriptDraft').hidden=true;
+  $('#exportTranscriptDraft').onclick=()=>{storeTranscriptDraft();exportState()};
+  const close=()=>{if(transcriptSaving)return;clearTimeout(draftSaveTimer);storeTranscriptDraft();dialog.close();editingTranscriptId=null};
   $('#closeTranscript').onclick=$('#cancelTranscript').onclick=close;
   dialog.oncancel=e=>{e.preventDefault();close()};
-  $('#transcriptForm').oninput=()=>{clearTimeout(draftSaveTimer);draftSaveTimer=setTimeout(()=>{storeTranscriptDraft();$('#transcriptSaveStatus').textContent='草稿已保存到本机。'},500)};
+  $('#transcriptForm').oninput=()=>{if(transcriptSaving)return;clearTimeout(draftSaveTimer);draftSaveTimer=setTimeout(()=>{storeTranscriptDraft();transcriptStatus('草稿已暂存，点击“保存修改”完成保存。')},500)};
   $('#transcriptForm').onsubmit=async event=>{
-    event.preventDefault();clearTimeout(draftSaveTimer);const segments=transcriptEditorSegments(),duration=chapter.audio?.duration||Infinity;
-    if(segments.some(s=>!s.text.trim()||s.text.length>16000||((s.start!==null||s.end!==null)&&(!Number.isFinite(s.start)||!Number.isFinite(s.end)||s.start<0||s.end<=s.start||s.end>duration+0.5)))){$('#transcriptSaveStatus').textContent='请填写文字，并检查时间：结束须晚于开始，且不超过本段录音。';return}
-    const button=$('#saveTranscript');button.disabled=true;
+    event.preventDefault();if(transcriptSaving)return;clearTimeout(draftSaveTimer);const segments=transcriptEditorSegments(),duration=chapter.audio?.duration||Infinity;
+    const problem=validateTranscriptSegments(segments,duration);
+    if(problem){storeTranscriptDraft();transcriptStatus(problem.message,'error',problem);return}
+    transcriptSaving=true;const button=$('#saveTranscript');button.disabled=true;button.textContent='正在保存…';
+    const editingControls=[...document.querySelectorAll('#transcriptRows input,#transcriptRows textarea,#closeTranscript,#cancelTranscript')];editingControls.forEach(el=>el.disabled=true);
+    transcriptStatus('正在保存修改，请稍候…','saving');
     const previous=notes.transcriptEdits?.[chapter.id],oldRows=sentences.map(s=>({...s})),oldMarks=JSON.parse(JSON.stringify(notes.highlights||[]));let committed=false;
     try{
+      await new Promise(resolve=>setTimeout(resolve,0));
       notes.transcriptEdits||={};notes.transcriptEdits[chapter.id]={version:1,segments,updatedAt:new Date().toISOString()};
       const built=rebuildListeningScript(base,segments),newRows=built.timing.sentences.map(s=>({...s,text:built.text.slice(s.charStart,s.charEnd)}));
-      preserveScriptNotes(chapter,oldRows,newRows);storeTranscriptDraft();delete notes.transcriptDrafts[chapter.id];await saveState();committed=true;
+      preserveScriptNotes(chapter,oldRows,newRows);storeTranscriptDraft();clearTimeout(saveTimer);delete notes.transcriptDrafts[chapter.id];await saveState({requireStorage:true,timeoutMs:10000});committed=true;
       if(current?.id===chapter.id){
         Object.assign(chapter,built);chapter._transcriptVersion=notes.transcriptEdits[chapter.id].updatedAt;sentences=newRows;alignedWords=chapter.timing.words;
         renderText();highlightSentence(Math.min(sentenceIndex,sentences.length-1));
       }
       dialog.close();editingTranscriptId=null;toast('听力原文已保存，生词与笔记保留。');
-    }catch{if(!committed){if(previous)notes.transcriptEdits[chapter.id]=previous;else delete notes.transcriptEdits[chapter.id];notes.highlights=oldMarks;storeTranscriptDraft()}$('#transcriptSaveStatus').textContent=committed?'修改已保存，请关闭编辑窗口查看。':'保存未完成，草稿仍保留，请重试或导出学习记录。'}
-    finally{button.disabled=false}
+    }catch(error){
+      if(!committed){if(previous)notes.transcriptEdits[chapter.id]=previous;else delete notes.transcriptEdits[chapter.id];notes.highlights=oldMarks;storeTranscriptDraft()}
+      const reason=error.name==='QuotaExceededError'?'本机可用存储不足。':error.name==='TimeoutError'?'本机保存超时。':error.name==='StorageUnavailableError'?'当前浏览器未提供可用的本地存储。':'';
+      transcriptStatus(committed?'修改已保存，请关闭编辑窗口查看。':reason+'保存未完成，输入内容仍保留，可重试或导出草稿备份。',committed?'success':'error');$('#exportTranscriptDraft').hidden=committed;
+    }
+    finally{transcriptSaving=false;button.disabled=false;button.textContent='保存修改';editingControls.forEach(el=>el.disabled=false)}
   };
   dialog.showModal();
 }
