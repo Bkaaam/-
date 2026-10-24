@@ -48,7 +48,15 @@ function preserveScriptNotes(chapter,oldRows,newRows){
   for(const mark of notes.highlights||[]){
     if(mark.scope!=='chapter'||mark.source!==chapter.id)continue;
     const index=Number(mark.anchor),row=newRows[index];if(!row)continue;
-    const quote=mark.quote||'',at=row.text.indexOf(quote);
+    const quote=mark.quote||'',previous=oldRows[index];let preferred=0;
+    if(previous&&Number.isFinite(mark.start)){
+      const relative=mark.start-previous.charStart,match=matchingTranscriptWords(previous.text,row.text).find(m=>relative>=m.old.index&&relative<m.old.index+m.old.length);
+      preferred=match?match.next.index+relative-match.old.index:relative;
+    }
+    let at=-1,distance=Infinity;
+    if(quote)for(let found=row.text.indexOf(quote);found>=0;found=row.text.indexOf(quote,found+1)){
+      const delta=Math.abs(found-preferred);if(delta<distance){at=found;distance=delta}
+    }
     if(!mark.whole){mark.start=at>=0?row.charStart+at:null;mark.end=at>=0?row.charStart+at+quote.length:null}
   }
 }
