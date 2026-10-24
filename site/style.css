@@ -87,3 +87,14 @@ body.has-player main{padding-bottom:calc(var(--audio-panel-height,170px) + 80px)
  .vocab-tabs{display:flex;flex-wrap:wrap}.vocab-tabs button{flex:1;min-height:44px}
  dialog{max-height:88vh;max-height:88dvh}
 }
+
+#transcriptEditor{width:calc(100% - 24px);max-width:780px;max-height:90vh;max-height:90dvh;padding:22px}
+.transcript-row{padding:14px 0;border-bottom:1px solid var(--line)}
+.transcript-row>label{display:block;font-size:13px;color:var(--muted)}
+.transcript-row textarea{display:block;width:100%;min-height:90px;margin-top:7px;resize:vertical;font:16px/1.6 system-ui,sans-serif;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px}
+.transcript-row details{margin-top:8px;font-size:12px}.transcript-row summary{cursor:pointer;min-height:28px}
+.transcript-times{display:flex;gap:12px;margin-top:8px}.transcript-times label{flex:1;min-width:0}.transcript-times input{width:100%;margin-top:5px;font-size:16px}
+.transcript-editor-actions{position:sticky;bottom:-22px;display:flex;gap:9px;background:var(--paper);padding:14px 0 max(14px,env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
+.transcript-editor-actions button{flex:1;min-height:44px;font-size:14px}
+#transcriptSaveStatus{color:var(--green);font-size:13px}#editTranscript{min-height:40px}
+@media(max-width:700px){#transcriptEditor{width:100%;margin:auto auto 0;border-radius:16px 16px 0 0;padding:16px}.transcript-editor-actions{bottom:-16px}.transcript-row textarea{font-size:16px}}

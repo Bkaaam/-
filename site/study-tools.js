@@ -158,27 +158,16 @@ renderReader=function(id){
   if(match){
     openedChapter[match.type]=id;
     if(match.type==='listening'){
+      applyListeningScript(match);
       match.audioOriginal||=match.audio;
-      match.audio=notes.audioQuality==='original'||originalAudioRecovery.has(id)?match.audioOriginal:(match.audioFast||match.audioOriginal);
+      match.audio=originalAudioRecovery.has(id)?match.audioOriginal:(match.audioFast||match.audioOriginal);
     }
   }
   const outcome=studyReader(id);
   if(match?.type==='reading')renderSummary(match);
-  if(match?.type==='listening'){renderAudioQuality(match);renderPlaybackOptions(match)}
+  if(match?.type==='listening'){renderPlaybackOptions(match);renderTranscriptEditorButton(match)}
   return outcome;
 };
-function renderAudioQuality(chapter){
-  let label=$('#audioQualityLabel');
-  if(!label){
-    label=document.createElement('label');label.id='audioQualityLabel';
-    label.innerHTML='音频版本 <select id="audioQuality"><option value="fast">省流量 · 先播放</option><option value="original">原音质</option></select>';
-    $('#listeningTools .modebar').append(label);
-  }
-  $('#audioQuality').value=chapter.audio===chapter.audioOriginal?'original':'fast';
-  $('#audioQuality').onchange=()=>{
-    originalAudioRecovery.delete(chapter.id);notes.audioQuality=$('#audioQuality').value;saveProgress();scheduleSave();renderReader(chapter.id);
-  };
-}
 $('#downloadAudio').onclick=()=>cacheListeningAudio();
 function renderSummary(chapter){
   $('#articleSummary')?.remove();

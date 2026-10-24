@@ -1,7 +1,7 @@
 'use strict';
 // Add context study modes without changing the IndexedDB database or its saved keys.
-let selectionEnabled=true, selectionTimer=0, nounEnabled=false, nounRevealed=false, activeVocabTab='reading';
-const originalRenderText=renderText, originalOpenWord=openWord, originalRenderReader=renderReader, originalPlaySentence=playSentence;
+let selectionEnabled=true, selectionTimer=0, activeVocabTab='reading';
+const originalRenderText=renderText, originalOpenWord=openWord;
 const glossFor=(chapter,index)=>chapter?.sentenceGlosses?.find(g=>g.charStart===sentences[index]?.charStart);
 
 function sentenceAnalysis(source){
@@ -35,18 +35,12 @@ renderText=function(){
 };
 openWord=function(el){
   originalOpenWord(el);
+  if(current?.type==='listening'&&current.transcriptWordReferences){
+    selected.key=editedWordKey(current,selected);$('#wordNote').value=notes.wordNotes?.[selected.key]||'';$('#saveWord').textContent=vocab[selected.key]?'✓ 已收藏':'＋ 收藏生词';
+  }
   const gloss=glossFor(current,Number(el.dataset.sentence)),out=$('#wordContextMeaning');
   out.hidden=!gloss?.zh;out.textContent=gloss?.zh?'本句含义：'+gloss.zh:'';
 };
-renderReader=function(id){
-  nounEnabled=false;nounRevealed=false;$('#nounMode').textContent='开启名词听写';$('#nounPanel').hidden=true;
-  return originalRenderReader(id);
-};
-playSentence=function(i){
-  if(nounEnabled&&i>=0&&i<sentences.length){nounRevealed=false;setTimeout(renderNounPanel,0)}
-  return originalPlaySentence(i);
-};
-
 function selectedSentenceNode(node){
   const element=node?.nodeType===1?node:node?.parentElement;
   return element?.closest?.('#text .sentence')||null;
@@ -71,30 +65,6 @@ $('#text').addEventListener('click',event=>{
 },true);
 $('#selectionMode').onclick=()=>{selectionEnabled=!selectionEnabled;$('#selectionMode').textContent=selectionEnabled?'长按划选词句 · 翻译开启':'长按划选词句 · 翻译关闭'};
 $('#selectionDialog [data-close]').onclick=()=>$('#selectionDialog').close();
-
-function nounsInSentence(index){const s=sentences[index];return(current?.nounSpans||[]).filter(n=>n.charStart>=s.charStart&&n.charEnd<=s.charEnd)}
-function annotatedSentence(index,nouns){
-  const s=sentences[index],text=current.text;let at=s.charStart,html='';
-  for(const n of nouns){html+=esc(text.slice(at,n.charStart));html+=`<mark>${esc(text.slice(n.charStart,n.charEnd))}</mark>`;at=n.charEnd}
-  return html+esc(text.slice(at,s.charEnd));
-}
-function renderNounPanel(){
-  const panel=$('#nounPanel');if(!nounEnabled||current?.type!=='listening'){panel.hidden=true;return}
-  panel.hidden=false;const nouns=nounsInSentence(sentenceIndex);
-  panel.innerHTML=`<div class="noun-card"><h3>第 ${sentenceIndex+1} 句 · 名词听写</h3><p>先听原声，把听到的名词按顺序写下，用空格或逗号隔开。</p><div class="actions"><button id="nounReplay">▶ 重听本句</button><button id="nounNext">下一句 →</button></div>${nouns.length?`<form id="nounForm"><label>本句约 ${nouns.length} 个名词<input id="nounInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="听到的名词…"></label><button type="submit">确认并核对</button></form>`:'<p>本句没有筛选出名词，可继续下一句。</p>'}<div id="nounResult" aria-live="polite"></div><p class="summary">名词由词典与句子位置自动筛选，请以录音和原文为准。</p></div>`;
-  $('#nounReplay').onclick=()=>originalPlaySentence(sentenceIndex);
-  $('#nounNext').onclick=()=>playSentence(Math.min(sentenceIndex+1,sentences.length-1));
-  if(nouns.length)$('#nounForm').onsubmit=event=>{
-    event.preventDefault();if(nounRevealed)return;nounRevealed=true;
-    const answers=$('#nounInput').value.trim().split(/[\s,，;；]+/).filter(Boolean);
-    const clean=s=>s.toLowerCase().replace(/[^a-z]/g,'');
-    const checks=nouns.map((n,i)=>clean(answers[i]||'')===clean(n.word));
-    nouns.forEach((n,i)=>{if(checks[i])return;const key=`noun|${current.id}|${n.charStart}`;vocab[key]={category:'corpus',word:n.word.toLowerCase(),id:current.id,char:n.charStart,title:current.title,sentence:sentences[sentenceIndex].text.trim(),meaning:findEntry(n.word).entry?.translation||'',phonetic:findEntry(n.word).entry?.phonetic||'',note:'名词听写答错；原句见上。'};});
-    if(checks.some(x=>!x))scheduleSave();
-    $('#nounResult').innerHTML=`<p>${checks.map((ok,i)=>`<span class="noun-check ${ok?'correct':'incorrect'}">${esc(nouns[i].word)} ${ok?'✓ 正确':'✗ 应写为 '+esc(nouns[i].word)}</span>`).join('')}</p><blockquote>${annotatedSentence(sentenceIndex,nouns)}</blockquote>${checks.some(x=>!x)?'<p>答错的名词已加入“听力语料库”。</p>':''}`;
-  };
-}
-$('#nounMode').onclick=()=>{nounEnabled=!nounEnabled;nounRevealed=false;$('#nounMode').textContent=nounEnabled?'关闭名词听写':'开启名词听写';if(nounEnabled){practice=true;$('#sentenceMode').classList.add('selected');$('#continuousMode').classList.remove('selected');renderNounPanel();playSentence(sentenceIndex)}else renderNounPanel()};
 
 function migrateManualToListening(){
   const migrated=[];

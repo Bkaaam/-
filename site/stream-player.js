@@ -19,38 +19,22 @@ function renderPlaybackOptions(chapter){
   $('#playbackStatus').textContent=wantsCompatibleAudio(chapter.id)?'兼容模式：录音下载解密完成后播放，下载一次可重复听。':'正在准备原声；流式加载失败时会自动切换兼容播放。';
   $('#systemAudio').open=isMiBrowser()||notes.audioPlayback==='compatible';
 }
-async function completeCachedRecording(meta,signal){
-  const cache=await caches.open('ielts-audio-chunks-v2'),url=new URL(meta.url,location.href).href;
-  const responses=await Promise.all(Array.from({length:meta.chunks},(_,i)=>cache.match(url+'?chunk='+i)));
-  if(responses.some(r=>!r))return null;
-  const parts=await Promise.all(responses.map(r=>r.arrayBuffer()));
-  const tagKey=url+'?gcm-tag=1';let response=await cache.match(tagKey),tag;
-  if(response)tag=new Uint8Array(await response.arrayBuffer());
-  else{
-    response=await fetch(url,{headers:{Range:`bytes=${meta.bytes+12}-${meta.bytes+27}`},signal});if(!response.ok)throw Error('Audio tag '+response.status);
-    tag=new Uint8Array(await response.arrayBuffer());if(response.status===200)tag=tag.slice(meta.bytes+12,meta.bytes+28);
-    if(tag.length!==16)throw Error('Incomplete audio tag');
-    cache.put(tagKey,new Response(tag)).catch(()=>{});
-  }
-  const sealed=new Uint8Array(meta.bytes+28);sealed.set(meta.iv);
-  for(let i=0;i<parts.length;i++){
-    if(parts[i].byteLength!==Math.min(meta.chunkSize,meta.bytes-i*meta.chunkSize))return null;
-    sealed.set(new Uint8Array(parts[i]),12+i*meta.chunkSize);
-  }
-  sealed.set(tag,12+meta.bytes);return sealed;
-}
 async function compatibleAudioSource(chapter,signal){
   const encryptionKey=key,url=new URL(chapter.audio.url,location.href).href;
+  const memory=decodedListeningBlobs.get(url);if(memory?.key===key)return URL.createObjectURL(memory.blob);
   const progress=n=>{if(current?.id===chapter.id)$('#trackTitle').textContent=`兼容播放 · 下载 ${Math.min(100,Math.round(n/(chapter.audio.bytes+28)*100))}%`};
   let cache;try{cache=await caches.open(MEDIA_CACHE)}catch{}
   const decode=async bytes=>{
     const raw=await decrypt(bytes,encryptionKey);
     if(signal.aborted||key!==encryptionKey)throw new DOMException('Aborted','AbortError');
-    return URL.createObjectURL(new Blob([raw],{type:'audio/mpeg'}));
+    const blob=new Blob([raw],{type:'audio/mpeg'});decodedListeningBlobs.set(url,{key:encryptionKey,blob});if(decodedListeningBlobs.size>3)decodedListeningBlobs.delete(decodedListeningBlobs.keys().next().value);return URL.createObjectURL(blob);
   };
   if(cache){const hit=await cache.match(url);if(hit)try{return await decode(await hit.arrayBuffer())}catch(error){if(signal.aborted)throw error;await cache.delete(url)}}
-  // Reuse previously downloaded encrypted chunks without relying on AES-CTR or a worker media URL.
-  try{const meta=await streamDescription(chapter.audio.url);if(meta){const bytes=await completeCachedRecording(meta,signal);if(bytes){const source=await decode(bytes);if(cache)cache.put(url,new Response(bytes)).catch(()=>{});return source}}}catch(error){if(signal.aborted)throw error}
+  // Three bounded range requests resume existing chunks; the final GCM tag authenticates the full MP3.
+  try{const meta=await streamDescription(chapter.audio.url);if(meta){
+    const bytes=await resumableRecording(meta,signal,progress);const source=await decode(bytes);
+    if(cache)cache.put(url,new Response(bytes)).catch(()=>{});return source;
+  }}catch(error){if(signal.aborted)throw error}
   for(let attempt=0;attempt<2;attempt++)try{
     const response=await cachedAsset(chapter.audio.url,{signal,progress});
     const source=await decode(await response.arrayBuffer());return source;
@@ -166,7 +150,7 @@ async function listeningSource(chapter,signal){
   return recordPlayback(chapter,await compatibleAudioSource(chapter,signal),'compatible');
 }
 function beginStreamDownload(){
-  clearTimeout(audioStartTimer);
+  clearTimeout(audioStartTimer);$('#downloadAudio').disabled=false;
   if($('#playbackStatus'))$('#playbackStatus').textContent=activePlayback?.mode==='stream'?'已就绪 · 边听边缓存':originalAudioRecovery.has(current?.id)?'已就绪 · 原音质兼容播放':'已就绪 · 兼容播放，可反复收听';
   if(activePlayback?.mode==='compatible')$('#downloadAudio').textContent='已缓存 ✓';
   if(activeStream&&navigator.serviceWorker.controller){
@@ -182,13 +166,8 @@ function stopStreamDownload(){
 async function cacheListeningAudio(){
   if(!current?.audio)return;
   if(activeStream){beginStreamDownload();return}
-  const button=$('#downloadAudio');button.disabled=true;button.textContent='正在缓存…';
-  try{
-    const meta=await streamDescription(current.audio.url);
-    if(meta){for(let i=0;i<meta.chunks;i++){await pageAudioChunk(meta,i);button.textContent=`正在缓存 ${Math.round((i+1)/meta.chunks*100)}%`}}
-    else{const response=await cachedAsset(current.audio.url);await(await caches.open(MEDIA_CACHE)).put(new URL(current.audio.url,location.href),response.clone())}
-    button.textContent='已缓存 ✓';
-  }
-  catch{toast('缓存未完成，请检查网络和存储空间')}
+  const chapter=current,button=$('#downloadAudio');button.disabled=true;button.textContent='正在缓存…';
+  try{const source=await compatibleAudioSource(chapter,loadController?.signal||new AbortController().signal);URL.revokeObjectURL(source);if(current?.id===chapter.id)button.textContent='已缓存 ✓'}
+  catch(error){if(error.name!=='AbortError')toast('缓存未完成，已下载片段保留，点击可续传')}
   finally{button.disabled=false}
 }
