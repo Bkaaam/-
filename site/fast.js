@@ -31,7 +31,7 @@ async function cachedAsset(path,options={}){
 async function getConfig(){
   const url=new URL('config.json',location.href).href;
   const refresh=async()=>{const r=await fetch(url,{cache:'no-cache'});if(!r.ok)throw Error('配置下载失败');const c=await r.clone().json();if(c.version<3||!c.bootstrap)throw Error('请刷新更新网页');try{await(await caches.open(DATA_CACHE)).put(url,r)}catch{}return c};
-  try{const hit=await(await caches.open(DATA_CACHE)).match(url);if(hit){const c=await hit.json();if(c.version>=3&&c.bootstrap){refresh().catch(()=>{});return c}}}catch{}
+  try{const hit=await(await caches.open(DATA_CACHE)).match(url);if(hit){const c=await hit.json();if(c.version>=3&&c.bootstrap&&c.readerRelease==='4.9'){refresh().catch(()=>{});return c}}}catch{}
   return refresh();
 }
 function primeLibrary(){

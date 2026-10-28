@@ -107,3 +107,8 @@ body.has-player main{padding-bottom:calc(var(--audio-panel-height,170px) + 80px)
 .transcript-row[data-invalid]{background:var(--soft);border-radius:8px;padding:14px 8px}
 .transcript-row [aria-invalid=true]{border:2px solid #a22c24}
 #exportTranscriptDraft{flex-basis:100%}
+
+/* Reading-only navigation; hidden listening DOM retains legacy storage compatibility. */
+#listeningTools,#player,#wordPlayback{display:none!important}
+@media(max-width:700px){nav{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+.translation-source{display:block;color:var(--muted);font-size:11px;margin-top:8px}.gloss-content .sentence-meaning{margin:8px 0;white-space:pre-wrap;line-height:1.9}.translation-edit{font-size:12px;padding:7px 10px}.selection-translation-row{padding:14px 0;border-bottom:1px solid var(--line)}.selection-translation-row p{white-space:pre-wrap;line-height:1.8}.selection-original{font-family:Georgia,serif;color:var(--ink)}#selectionSentence{display:none}#readingTranslationEditor textarea{width:100%;font-size:16px;line-height:1.8;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:inherit}#readingTranslationEditor label{display:block}#readingTranslationStatus{font-size:13px;min-height:20px}#readingTranslationEditor .actions{position:sticky;bottom:0;background:var(--paper);padding:10px 0}
